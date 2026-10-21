@@ -85,7 +85,7 @@ android.copy_libs = 1
 p4a.archs = arm64-v8a
 
 # (str) python-for-android branch to use
-p4a.branch = develop
+p4a.branch = v2024.01.21
 
 # (str) The format used to package the app for release mode (aab or apk)
 android.release_artifact = apk

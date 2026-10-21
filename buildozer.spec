@@ -29,7 +29,7 @@ version = 1.0.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3,kivy,kivymd,yt-dlp,pyjnius,android,certifi,urllib3,requests,charset-normalizer,idna
+requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.1,kivymd==1.2.0,yt-dlp,pyjnius,android,certifi,urllib3,requests,charset-normalizer,idna,six
 
 # (str) Presplash of the application
 #presplash.filename = %(source.dir)s/data/presplash.png
@@ -63,7 +63,7 @@ android.ndk = 25b
 android.enable_androidx = True
 
 # (list) List of Android architectures to build for
-android.archs = arm64-v8a, armeabi-v7a
+android.archs = arm64-v8a
 
 # (str) Custom file to insert in the AndroidManifest.xml inside the <activity> tag
 # This registers the app as a native Android Share Target for plain text and URL links
@@ -82,7 +82,10 @@ android.logcat_filters = *:S python:D
 android.copy_libs = 1
 
 # (list) The Android archs to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
-p4a.archs = arm64-v8a, armeabi-v7a
+p4a.archs = arm64-v8a
+
+# (str) python-for-android branch to use
+p4a.branch = develop
 
 # (str) The format used to package the app for release mode (aab or apk)
 android.release_artifact = apk

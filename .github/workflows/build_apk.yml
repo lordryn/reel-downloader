@@ -33,9 +33,7 @@ jobs:
           path: |
             .buildozer
             ~/.buildozer
-          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            ${{ runner.os }}-buildozer-
+          key: buildozer-v2-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
 
       - name: Install System Dependencies
         run: |
@@ -47,7 +45,7 @@ jobs:
 
       - name: Install Python Build Tools
         run: |
-          pip install --upgrade pip setuptools wheel
+          pip install --upgrade "pip<25" setuptools wheel
           pip install buildozer cython==0.29.36
 
       - name: Build Debug APK

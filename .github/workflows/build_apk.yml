@@ -33,7 +33,7 @@ jobs:
           path: |
             .buildozer
             ~/.buildozer
-          key: buildozer-v4-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-v5-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
 
       - name: Install System Dependencies
         run: |

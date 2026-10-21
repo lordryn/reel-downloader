@@ -13,7 +13,7 @@ package.domain = org.reeldownloader
 source.dir = .
 
 # (list) Source files to include (must include xml for intent_filters.xml)
-source.include_exts = py,png,jpg,kv,atlas,xml,json
+source.include_exts = py,png,jpg,kv,atlas,xml,json,ttf
 
 # (list) List of inclusions using pattern matching
 #source.include_patterns = assets/*,images/*.png
@@ -29,7 +29,7 @@ version = 1.0.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.1,kivymd==1.2.0,yt-dlp,pyjnius,android,certifi,urllib3,requests,charset-normalizer,idna,six
+requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.1,kivymd==1.2.0,pillow,sqlite3,openssl,yt-dlp,pyjnius,android,certifi,urllib3,requests,charset-normalizer,idna,six
 
 # (str) Presplash of the application
 #presplash.filename = %(source.dir)s/data/presplash.png

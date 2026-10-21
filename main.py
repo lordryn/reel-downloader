@@ -20,8 +20,10 @@ import time
 import threading
 
 # ---------------------------------------------------------------------------
-# 1. SSL Certificate Configuration for Android yt-dlp HTTPS Handshakes
+# 1. SSL Certificate Configuration & Global Crash Interceptor
 # ---------------------------------------------------------------------------
+_CRASH_INFO = None
+
 try:
     import certifi
     os.environ['SSL_CERT_FILE'] = certifi.where()
@@ -29,31 +31,44 @@ try:
 except ImportError:
     pass
 
-import yt_dlp
-from kivy.clock import Clock
-from kivy.metrics import dp
-from kivy.uix.scrollview import ScrollView
+# Lazy import yt_dlp so startup is instant and doesn't crash on splash screen
+_yt_dlp_module = None
 
-from kivymd.app import MDApp
-from kivymd.uix.screen import MDScreen
-from kivymd.uix.boxlayout import MDBoxLayout
-from kivymd.uix.card import MDCard
-from kivymd.uix.textfield import MDTextField
-from kivymd.uix.button import (
-    MDRaisedButton,
-    MDFlatButton,
-    MDFillRoundFlatIconButton,
-    MDIconButton,
-)
-from kivymd.uix.label import MDLabel
-from kivymd.uix.selectioncontrol import MDSwitch
-from kivymd.uix.progressbar import MDProgressBar
-from kivymd.uix.dialog import MDDialog
-
+def get_yt_dlp():
+    global _yt_dlp_module
+    if _yt_dlp_module is None:
+        import yt_dlp
+        _yt_dlp_module = yt_dlp
+    return _yt_dlp_module
 try:
-    from kivymd.uix.toolbar import MDTopAppBar
-except ImportError:
-    from kivymd.uix.toolbar import MDToolbar as MDTopAppBar
+    from kivy.clock import Clock
+    from kivy.metrics import dp
+    from kivy.uix.scrollview import ScrollView
+
+    from kivymd.app import MDApp
+    from kivymd.uix.screen import MDScreen
+    from kivymd.uix.boxlayout import MDBoxLayout
+    from kivymd.uix.card import MDCard
+    from kivymd.uix.textfield import MDTextField
+    from kivymd.uix.button import (
+        MDRaisedButton,
+        MDFlatButton,
+        MDFillRoundFlatIconButton,
+        MDIconButton,
+    )
+    from kivymd.uix.label import MDLabel
+    from kivymd.uix.selectioncontrol import MDSwitch
+    from kivymd.uix.progressbar import MDProgressBar
+    from kivymd.uix.dialog import MDDialog
+
+    try:
+        from kivymd.uix.toolbar import MDTopAppBar
+    except ImportError:
+        from kivymd.uix.toolbar import MDToolbar as MDTopAppBar
+except Exception as e:
+    import traceback
+    _CRASH_INFO = traceback.format_exc()
+    MDApp = object
 
 
 # ---------------------------------------------------------------------------
@@ -640,7 +655,8 @@ class ReelDownloaderApp(MDApp):
         }
 
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl_module = get_yt_dlp()
+            with ydl_module.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 if not info:
                     raise Exception("Video is private or requires login.")
@@ -858,4 +874,25 @@ class ReelDownloaderApp(MDApp):
 
 
 if __name__ == "__main__":
-    ReelDownloaderApp().run()
+    if _CRASH_INFO:
+        from kivy.app import App
+        from kivy.uix.label import Label
+        from kivy.uix.scrollview import ScrollView
+
+        class ErrorFallbackApp(App):
+            def build(self):
+                scroll = ScrollView()
+                lbl = Label(
+                    text=f"Reel Downloader Startup Error:\n\n{_CRASH_INFO}",
+                    color=(1, 0.3, 0.3, 1),
+                    font_size="13sp",
+                    size_hint_y=None,
+                    padding=(20, 20)
+                )
+                lbl.bind(texture_size=lbl.setter('size'))
+                scroll.add_widget(lbl)
+                return scroll
+
+        ErrorFallbackApp().run()
+    else:
+        ReelDownloaderApp().run()

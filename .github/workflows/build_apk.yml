@@ -33,7 +33,7 @@ jobs:
           path: |
             .buildozer
             ~/.buildozer
-          key: buildozer-v3-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-v4-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
 
       - name: Install System Dependencies
         run: |
@@ -41,7 +41,8 @@ jobs:
           sudo apt-get install -y \
             git zip unzip autoconf libtool pkg-config \
             zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo6 \
-            cmake libffi-dev libssl-dev automake libltdl-dev
+            cmake libffi-dev libssl-dev automake libltdl-dev \
+            libsqlite3-dev libjpeg-dev
 
       - name: Install Python Build Tools
         run: |

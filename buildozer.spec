@@ -67,7 +67,9 @@ android.archs = arm64-v8a
 
 # (str) Custom file to insert in the AndroidManifest.xml inside the <activity> tag
 # This registers the app as a native Android Share Target for plain text and URL links
+android.manifest.intent_filters = intent_filters.xml
 android.manifest_intent_filters = intent_filters.xml
+android.manifest.launch_mode = singleTask
 
 # (bool) If True, then automatically accept SDK license agreements.
 android.accept_sdk_license = True

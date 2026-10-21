@@ -180,37 +180,47 @@ class ReelDownloaderApp(MDApp):
 
         self.url_input = MDTextField(
             hint_text="Video / Reel URL",
-            helper_text="Paste URL manually or receive via system Share Sheet",
+            helper_text="Tap 'Paste' or share from any app",
             helper_text_mode="on_focus",
             mode="rectangle",
             icon_right="link-variant",
             size_hint_x=1.0,
-            multiline=False
+            multiline=False,
+            use_bubble=True,
+            use_handles=True,
         )
         download_card.add_widget(self.url_input)
 
         button_row = MDBoxLayout(
             orientation="horizontal",
-            spacing=dp(12),
+            spacing=dp(8),
             adaptive_height=True,
             pos_hint={"center_x": 0.5}
         )
 
+        self.paste_button = MDFillRoundFlatIconButton(
+            icon="content-paste",
+            text="Paste",
+            on_release=lambda x: self.paste_from_clipboard(),
+            size_hint_x=0.3
+        )
+
         self.download_button = MDFillRoundFlatIconButton(
             icon="download",
-            text="Download Reel",
+            text="Download",
             on_release=lambda x: self.start_download(),
-            size_hint_x=0.5
+            size_hint_x=0.4
         )
 
         self.share_button = MDFillRoundFlatIconButton(
             icon="share-variant",
-            text="Share Video",
+            text="Share",
             on_release=lambda x: self.share_video(),
             disabled=True,
-            size_hint_x=0.5
+            size_hint_x=0.3
         )
 
+        button_row.add_widget(self.paste_button)
         button_row.add_widget(self.download_button)
         button_row.add_widget(self.share_button)
         download_card.add_widget(button_row)
@@ -386,6 +396,53 @@ class ReelDownloaderApp(MDApp):
                 json.dump({"auto_download_reshare": self.auto_download_reshare}, f)
         except Exception as e:
             print(f"[Settings Save Warning]: {e}")
+
+    # -----------------------------------------------------------------------
+    # Clipboard Helper (Native Android JNI + Kivy Core)
+    # -----------------------------------------------------------------------
+    def paste_from_clipboard(self, instance=None):
+        """Reads text from system clipboard and populates the URL input."""
+        try:
+            text = self.get_clipboard_text()
+            if text:
+                url = extract_first_url(text)
+                self.url_input.text = url if url else text.strip()
+                self.status_label.text = "URL pasted from clipboard!"
+            else:
+                self.status_label.text = "Clipboard is empty or contains no text."
+        except Exception as e:
+            self.status_label.text = f"Clipboard Error: {e}"
+
+    def get_clipboard_text(self) -> str:
+        """Robust multi-tier clipboard reader for Android and desktop."""
+        # Tier 1: Try Android Context CLIPBOARD_SERVICE via PyJNIus
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            Context = autoclass('android.content.Context')
+            activity = PythonActivity.mActivity
+            if activity:
+                clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE)
+                if clipboard and clipboard.hasPrimaryClip():
+                    clip_data = clipboard.getPrimaryClip()
+                    if clip_data.getItemCount() > 0:
+                        item = clip_data.getItemAt(0)
+                        text = item.getText()
+                        if text:
+                            return str(text)
+        except Exception as e:
+            print(f"[Android Clipboard Warning]: {e}")
+
+        # Tier 2: Try Kivy Core Clipboard
+        try:
+            from kivy.core.clipboard import Clipboard
+            val = Clipboard.paste()
+            if val:
+                return str(val)
+        except Exception as e:
+            print(f"[Kivy Clipboard Warning]: {e}")
+
+        return ""
 
     # -----------------------------------------------------------------------
     # Inbound Android Share Intent Handling (Cold Start & Warm Resume)

@@ -102,6 +102,8 @@ class ReelDownloaderApp(MDApp):
     info_dialog = None
     last_downloaded_file = None
     _last_handled_url = None
+    _last_shared_file = None
+    _last_shared_uri = None
     auto_download_reshare = False
     is_downloading = False
 
@@ -673,6 +675,9 @@ class ReelDownloaderApp(MDApp):
         should_auto_reshare = is_auto_reshare or self.auto_download_reshare
 
         self.is_downloading = True
+        self.last_downloaded_file = None
+        self._last_shared_file = None
+        self._last_shared_uri = None
         self.status_label.text = "Downloading reel... Please wait."
         self.download_button.disabled = True
         self.share_button.disabled = True
@@ -780,102 +785,179 @@ class ReelDownloaderApp(MDApp):
         self.progress_bar.opacity = 0
 
     # -----------------------------------------------------------------------
-    # Outbound Android Share Sheet (MediaStore / FileProvider / StrictMode)
+    # Outbound Android Share Sheet (MediaStore Video Stream Publisher)
     # -----------------------------------------------------------------------
     def share_video(self, instance=None):
         """
-        Triggers Android system share chooser with the downloaded .mp4 file.
-        Provides 3-tier compatibility:
-          1. MediaStore Video Content URI
-          2. AndroidX / Support FileProvider Content URI
-          3. StrictMode VmPolicy fallback
-        Always applies FLAG_GRANT_READ_URI_PERMISSION (1).
+        Publishes the downloaded reel to Android's public MediaStore collection
+        (Movies/ReelDownloader) via ContentResolver.openOutputStream, then triggers
+        the Android system share sheet with a valid content:// URI.
+
+        This guarantees full compatibility across Android 8 through 15+, allowing
+        external apps (WhatsApp, Discord, Messenger, QuickShare, etc.) to read
+        the video without hitting scoped storage EACCES permission errors.
         """
         if not self.last_downloaded_file or not os.path.exists(self.last_downloaded_file):
             self.status_label.text = "File missing. Please download a reel first."
             return
 
+        self.status_label.text = "Preparing reel for sharing..."
+        self.share_button.disabled = True
+
+        threading.Thread(
+            target=self._publish_and_share_thread,
+            daemon=True
+        ).start()
+
+    def _publish_and_share_thread(self):
+        """Worker thread that copies video into MediaStore and pops the share sheet."""
+        try:
+            content_uri = self._get_or_create_mediastore_uri()
+            if content_uri:
+                Clock.schedule_once(lambda dt: self._launch_share_intent(content_uri), 0)
+            else:
+                Clock.schedule_once(
+                    lambda dt: self._on_share_failed("Could not obtain shareable content URI."), 0
+                )
+        except Exception as e:
+            err_msg = str(e)
+            print(f"[_publish_and_share_thread Error]: {err_msg}")
+            Clock.schedule_once(
+                lambda dt: self._on_share_failed(f"Share Error: {err_msg[:45]}"), 0
+            )
+
+    def _get_or_create_mediastore_uri(self):
+        """
+        Inserts video metadata into Android MediaStore, streams video bytes via
+        resolver.openOutputStream, and returns the resulting content:// URI.
+        Caches the URI so repeated shares of the same download are instantaneous.
+        """
+        # Return cached content URI if already published for this file
+        if (
+            self._last_shared_file == self.last_downloaded_file
+            and self._last_shared_uri is not None
+        ):
+            return self._last_shared_uri
+
         try:
             from jnius import autoclass, cast
 
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
-            Intent = autoclass('android.content.Intent')
-            String = autoclass('java.lang.String')
-            File = autoclass('java.io.File')
+            activity = PythonActivity.mActivity
+            if not activity:
+                raise Exception("Android Activity not available")
 
-            currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
-            context = currentActivity.getApplicationContext()
+            context = activity.getApplicationContext()
+            resolver = context.getContentResolver()
+            File = autoclass('java.io.File')
             file_obj = File(self.last_downloaded_file)
             file_name = file_obj.getName()
-            content_uri = None
 
-            # Strategy 1: Insert into MediaStore Video Content Provider
+            ContentValues = autoclass('android.content.ContentValues')
+            MediaStoreVideoMedia = autoclass('android.provider.MediaStore$Video$Media')
+            MediaStoreMediaColumns = autoclass('android.provider.MediaStore$MediaColumns')
+            BuildVERSION = autoclass('android.os.Build$VERSION')
+            String = autoclass('java.lang.String')
+            Integer = autoclass('java.lang.Integer')
+            Environment = autoclass('android.os.Environment')
+
+            values = ContentValues()
+            values.put(MediaStoreMediaColumns.DISPLAY_NAME, String(file_name))
+            values.put(MediaStoreMediaColumns.MIME_TYPE, String("video/mp4"))
+            values.put(MediaStoreMediaColumns.TITLE, String(file_name))
+
+            # Android 10+ (API 29+): Scoped storage relative path & pending state
+            if BuildVERSION.SDK_INT >= 29:
+                rel_path = Environment.DIRECTORY_MOVIES + "/ReelDownloader"
+                values.put(MediaStoreMediaColumns.RELATIVE_PATH, String(rel_path))
+                values.put(MediaStoreMediaColumns.IS_PENDING, Integer(1))
+
+            content_uri = resolver.insert(MediaStoreVideoMedia.EXTERNAL_CONTENT_URI, values)
+            if not content_uri:
+                raise Exception("Failed to insert MediaStore record")
+
+            # Stream video file bytes into MediaStore OutputStream
+            out_stream = resolver.openOutputStream(content_uri)
+            if not out_stream:
+                raise Exception("Failed to open MediaStore output stream")
+
             try:
-                ContentValues = autoclass('android.content.ContentValues')
-                MediaStoreVideoMedia = autoclass('android.provider.MediaStore$Video$Media')
-                resolver = context.getContentResolver()
-
-                values = ContentValues()
-                values.put("_data", self.last_downloaded_file)
-                values.put("mime_type", "video/mp4")
-                values.put("_display_name", file_name)
-                values.put("title", file_name)
-
-                content_uri = resolver.insert(MediaStoreVideoMedia.EXTERNAL_CONTENT_URI, values)
-            except Exception as ms_err:
-                print(f"[MediaStore Insert Warning]: {ms_err}")
-                content_uri = None
-
-            # Strategy 2: FileProvider (Standard for scoped files)
-            if not content_uri:
-                for provider_class in (
-                    'androidx.core.content.FileProvider',
-                    'android.support.v4.content.FileProvider'
-                ):
-                    try:
-                        FileProvider = autoclass(provider_class)
-                        package_name = context.getPackageName()
-                        authority = f"{package_name}.fileprovider"
-                        content_uri = FileProvider.getUriForFile(context, authority, file_obj)
-                        if content_uri:
+                with open(self.last_downloaded_file, 'rb') as src_file:
+                    while True:
+                        chunk = src_file.read(65536)
+                        if not chunk:
                             break
-                    except Exception:
-                        continue
+                        out_stream.write(chunk)
+                out_stream.flush()
+            finally:
+                out_stream.close()
 
-            # Strategy 3: StrictMode VmPolicy fallback (bypasses FileUriExposedException)
-            if not content_uri:
-                try:
-                    StrictMode = autoclass('android.os.StrictMode')
-                    builder = autoclass('android.os.StrictMode$VmPolicy$Builder')()
-                    StrictMode.setVmPolicy(builder.build())
+            # Android 10+: Mark file ready (IS_PENDING = 0)
+            if BuildVERSION.SDK_INT >= 29:
+                finish_values = ContentValues()
+                finish_values.put(MediaStoreMediaColumns.IS_PENDING, Integer(0))
+                resolver.update(content_uri, finish_values, None, None)
 
-                    Uri = autoclass('android.net.Uri')
-                    content_uri = Uri.fromFile(file_obj)
-                except Exception as sm_err:
-                    print(f"[StrictMode Fallback Warning]: {sm_err}")
+            self._last_shared_file = self.last_downloaded_file
+            self._last_shared_uri = content_uri
+            return content_uri
 
-            if not content_uri:
-                self.status_label.text = "Share Error: Could not generate share URI."
-                return
+        except ImportError:
+            # Running on desktop / non-Android
+            print("[Share]: PyJNIus not available (desktop environment)")
+            return None
+        except Exception as e:
+            print(f"[MediaStore Publisher Error]: {e}")
+            # StrictMode fallback
+            try:
+                from jnius import autoclass
+                StrictMode = autoclass('android.os.StrictMode')
+                builder = autoclass('android.os.StrictMode$VmPolicy$Builder')()
+                StrictMode.setVmPolicy(builder.build())
+                Uri = autoclass('android.net.Uri')
+                File = autoclass('java.io.File')
+                return Uri.fromFile(File(self.last_downloaded_file))
+            except Exception as sm_err:
+                print(f"[StrictMode Fallback Error]: {sm_err}")
+                return None
 
-            # Construct ACTION_SEND Intent
+    def _launch_share_intent(self, content_uri):
+        """Constructs and fires the ACTION_SEND Intent with read permissions."""
+        try:
+            from jnius import autoclass, cast
+
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
+            Intent = autoclass('android.content.Intent')
+            String = autoclass('java.lang.String')
+            ClipData = autoclass('android.content.ClipData')
+
             share_intent = Intent(Intent.ACTION_SEND)
             share_intent.setType("video/mp4")
             share_intent.putExtra(Intent.EXTRA_STREAM, cast('android.os.Parcelable', content_uri))
-            # FLAG_GRANT_READ_URI_PERMISSION = 1
-            share_intent.addFlags(1)
+            share_intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+            # Explicit ClipData ensures permission flags propagate to target app
+            clip_data = ClipData.newRawUri(String("Reel Video"), content_uri)
+            share_intent.setClipData(clip_data)
 
             chooser = Intent.createChooser(share_intent, String("Share Reel via..."))
-            chooser.addFlags(1)
+            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
             currentActivity.startActivity(chooser)
             self.status_label.text = "System share sheet opened!"
-
         except ImportError:
             self.status_label.text = (
                 f"Sharing requires Android.\nFile: {os.path.basename(self.last_downloaded_file)}"
             )
         except Exception as e:
-            self.status_label.text = f"Share Error: {str(e)[:45]}"
+            self._on_share_failed(f"Launch Error: {str(e)[:45]}")
+        finally:
+            self.share_button.disabled = False
+
+    def _on_share_failed(self, error_message: str):
+        self.status_label.text = error_message
+        self.share_button.disabled = False
 
     # -----------------------------------------------------------------------
     # Storage Cleanup Utility
@@ -901,6 +983,8 @@ class ReelDownloaderApp(MDApp):
                         pass
 
             self.last_downloaded_file = None
+            self._last_shared_file = None
+            self._last_shared_uri = None
             self.share_button.disabled = True
             freed_mb = freed_bytes / (1024 * 1024)
             self.status_label.text = f"Cleared {deleted_count} video(s) ({freed_mb:.1f} MB freed)."

@@ -1,0 +1,18 @@
+# Buildozer artifacts
+.buildozer/
+bin/
+
+# Temporary / Scratch archives
+*.zip
+*.tar.gz
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
